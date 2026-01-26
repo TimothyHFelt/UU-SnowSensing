@@ -1,0 +1,3 @@
+## Hardware Purchase
+
+This repository contains Microsoft Excel spreadsheets that list components you can use to construct a snow sensing station, their cost at the time the spreadsheets were created, and a URL link to where they can be purchased. The hardware spreadsheets contain all the hardware components that are part of the actual station deployment - including the deployment platform, sensors, dataloggers, power components, communications, etc. 
