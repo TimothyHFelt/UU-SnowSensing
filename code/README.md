@@ -1,4 +1,7 @@
 # Snow Sensing Station – Arduino (EnviroDIY Mayfly)
+## Authors
+
+This project was modified from the Jeff Horsburgh lab from Utah State University to introduce more modularity and additional functionality specifically made for the MayFly DataLogger.
 
 ## Overview
 
