@@ -2,6 +2,7 @@
 ## Authors
 
 This project was modified from the Jeff Horsburgh lab from Utah State University to introduce more modularity and additional functionality specifically made for the MayFly DataLogger.
+The additional Functionality was implemented by Timothy Felt from the University of Utah.
 
 ## Overview
 
