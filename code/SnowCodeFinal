@@ -18,6 +18,7 @@
 #include <SerialWombat.h>
 #include <SerialWombatUART.h>
 //#include <SoftwareSerial.h>
+//#include "snow_station_definitions.h"
 
 // Set serial baud rates
 #define MODEM_SERIAL_BAUD_RATE 9600
@@ -64,6 +65,14 @@ const uint8_t SOIL_ANALOG_2_PIN = A2;
 // Teros-12 SDI-12 (D4-7 Grove)
 SDI12 mySDI12(7);
 
+//pyrgeometer Constants 
+const int K1 = 9.033;
+const int K2 = 1.024;
+const int ST = .0000000567;
+
+//pyranometer Constants 
+const int CFU = 17.5;
+const int CFD = 6.7;
 
 
 // Temperature sensor (if using OneWire DS18B20)
@@ -75,7 +84,9 @@ const char apn[] = "hologram";
 
 // ===== SENSOR OBJECTS =====
 RTC_DS3231 rtc;
-Adafruit_ADS1115 ads;  // ADS1115 for Apogee sensors
+Adafruit_ADS1115 ads;
+Adafruit_ADS1115 ads1;  // ADS1115 for Apogee sensors
+Adafruit_ADS1115 ads2;
 
 // ===== SYSTEM CONTROL =====
 bool testMode = true;  // Set to false for production 15-minute intervals
@@ -349,7 +360,14 @@ bool testApogeeRadiation(SensorData& data) {
   Serial.println("Reading ADS1115 channels...");
   
   // Read all 4 channels (adjust channel assignments as needed)
-  data.pyrgeometer_up_mv = ads.readADC_SingleEnded(0) * ads.computeVolts(1) * 1000;
+  int raw_pyr_up = ads1.readADC_Differential_0_1();
+  int pyrgeometerData1 = ads1.computeVolts(raw_pyr_up) * 1000;
+
+  int raw_temp1 = ads2.readADC_SingleEnded(1);
+  int pyrgeometerTemp1 = ads2.computeVolts(raw_temp1) * 1000;
+
+  data.pyrgeometer_up_mv = K1*pyrgeometerData1+K2*ST*pyrgeometerTemp1;
+  
   delay(50);
   DateTime now = rtc.now();
   if(data.pyrgeometer_up_mv == 0 && !(now.hour()>9 && now.hour()<17)){
@@ -357,21 +375,34 @@ bool testApogeeRadiation(SensorData& data) {
     LogError("The time is " + String(rtc.now().hour()) + ":" + String(rtc.now().minute()) + " and the pyrgeometer up radiation value is 0. Check connection.");
     myBool = false;
   }
-  data.pyrgeometer_down_mv = ads.readADC_SingleEnded(1) * ads.computeVolts(1) * 1000;
+  int raw_pyr_down = ads1.readADC_Differential_2_3();
+  int pyrgeometerData2 = ads1.computeVolts(raw_pyr_down) * 1000;
+
+  int raw_temp2 = ads2.readADC_SingleEnded(2);
+  int pyrgeometerTemp2 = ads2.computeVolts(raw_temp2) * 1000;
+  
+  data.pyrgeometer_down_mv = K1*pyrgeometerData2+K2*ST*pyrgeometerTemp2;
+
   delay(50);
   if(data.pyrgeometer_down_mv == 0 && !(now.hour()>9 && now.hour()<17)){
     sensors[6].activateAlarm +=1;
     LogError("The time is " + String(rtc.now().hour()) + ":" + String(rtc.now().minute()) + " and the pyrgeometer down radiation value is 0. Check connection.");
     myBool = false;
   }
-  data.pyranometer_up_mv = ads.readADC_SingleEnded(2) * ads.computeVolts(1) * 1000;
+  int raw_pyra_up = data.pyranometer_up_mv = ads.readADC_Differential_2_3();
+  int pyranometerUpData = ads.computeVolts(raw_pyra_up) * 1000;
+  data.pyranometer_up_mv = CFU*pyranometerUpData;
   delay(50);
   if(data.pyranometer_up_mv == 0 && !(now.hour()>9 && now.hour()<17)){
     sensors[7].activateAlarm +=1;
     LogError("The time is " + String(rtc.now().hour()) + ":" + String(rtc.now().minute()) + " and the pyranometer up radiation value is 0. Check connection.");
     myBool = false;
   }
-  data.pyranometer_down_mv = ads.readADC_SingleEnded(3) * ads.computeVolts(1) * 1000;
+
+  int raw_pyra_down = data.pyranometer_down_mv = ads.readADC_Differential_0_1();
+  int pyranometerDownData = ads.computeVolts(raw_pyra_down) * 1000;
+  data.pyranometer_down_mv = CFD*pyranometerDownData;
+  
   delay(50);
   if(data.pyranometer_down_mv == 0 && !(now.hour()>9 && now.hour()<17)){
     sensors[8].activateAlarm +=1;
@@ -471,7 +502,7 @@ bool testSoilMoisture(SensorData& data) {
   if (sdiResponse_a.length() == 0){
     Serial.println("No measurement taken. Check physical connection.");
     sensors[1].activateAlarm +=1;
-    return false;
+    myBool = false;
   }
   else {
     Serial.println("Measurement was taken.");
@@ -482,7 +513,7 @@ bool testSoilMoisture(SensorData& data) {
   Serial.println(vmc_a);
   if(vmc_a>0.70 || vmc_a<-0.50){
     sensors[1].activateAlarm+=1;
-    return false;
+    myBool = false;
   }
   if(vmc_a>0.70){
     String message = "Teros A water content is too high at " + String(vmc_a) + ". Teros A might be in a puddle.";
@@ -515,13 +546,13 @@ bool testSoilMoisture(SensorData& data) {
   data.soil_moisture_teros = sdiResponse_a;
   
 
-  Serial.println("taking soil measurement from address c");
-  mySDI12.sendCommand("cM!");
+  Serial.println("taking soil measurement from address b");
+  mySDI12.sendCommand("bM!");
   delay(30);
   mySDI12.clearBuffer();
   delay(2000);
-  Serial.println("Getting the data from address c");
-  mySDI12.sendCommand("cD0!");
+  Serial.println("Getting the data from address b");
+  mySDI12.sendCommand("bD0!");
   delay(30);
   String sdiResponse_b = "";  // Create a blank String that will become the reported value
   while (mySDI12.available()) {
@@ -534,7 +565,7 @@ bool testSoilMoisture(SensorData& data) {
   if (sdiResponse_b.length() == 0){
     Serial.println("No measurement taken. Check physical connection.");
     sensors[2].activateAlarm +=1;
-    return false;
+    myBool = false;
   }
   else {
     Serial.println("Measurement was taken.");
@@ -578,68 +609,68 @@ bool testSoilMoisture(SensorData& data) {
   data.soil_moisture_teros2 = sdiResponse_b;
 
 
-  Serial.println("taking soil measurement from address b");
-  mySDI12.sendCommand("bM!");
-  delay(30);
-  mySDI12.clearBuffer();
-  delay(2000);
-  Serial.println("Getting the data from address b");
-  mySDI12.sendCommand("bD0!");
-  delay(30);
-  String sdiResponse_c = "";  // Create a blank String that will become the reported value
-  while (mySDI12.available()) {
-    char c = mySDI12.read();  // Read in a character
-    if ((c != '\n') && (c != '\r')) {  // If the read-in character isn't a new line
-      sdiResponse_c += c;  // Add the character to the String
-      delay(10);
-    }
-  }
-  if (sdiResponse_c.length() == 0){
-    Serial.println("No measurement taken. Check physical connection.");
-    sensors[3].activateAlarm +=1;
-    return false;
-  }
-  else {
-    Serial.println("Measurement was taken.");
-  }
-  mySDI12.clearBuffer();  // Clear the buffer for the next command
-  float vmc_c = getValue(sdiResponse_c, '+', 1).toFloat()/10000;
-  Serial.print("Volumetric Water Content: ");
-  Serial.println(vmc_c);
-  if(vmc_c>0.70 || vmc_c<-0.50){
-    sensors[3].activateAlarm+=1;
-    myBool = false;
-  }
-  if(vmc_c>0.70){
-    String message = "Teros C water content is too high at " + String(vmc_c) + ". Teros C might be in a puddle.";
-    LogError(message);
-  }
-  else if(vmc_c<-0.5){
-    String message = "Teros C water content is too low at " + String(vmc_c) + ". Check sensor.";
-    LogError(message);
-  }
+  // Serial.println("taking soil measurement from address b");
+  // mySDI12.sendCommand("bM!");
+  // delay(30);
+  // mySDI12.clearBuffer();
+  // delay(2000);
+  // Serial.println("Getting the data from address b");
+  // mySDI12.sendCommand("bD0!");
+  // delay(30);
+  // String sdiResponse_c = "";  // Create a blank String that will become the reported value
+  // while (mySDI12.available()) {
+  //   char c = mySDI12.read();  // Read in a character
+  //   if ((c != '\n') && (c != '\r')) {  // If the read-in character isn't a new line
+  //     sdiResponse_c += c;  // Add the character to the String
+  //     delay(10);
+  //   }
+  // }
+  // if (sdiResponse_c.length() == 0){
+  //   Serial.println("No measurement taken. Check physical connection.");
+  //   sensors[3].activateAlarm +=1;
+  //   myBool = false;
+  // }
+  // else {
+  //   Serial.println("Measurement was taken.");
+  // }
+  // mySDI12.clearBuffer();  // Clear the buffer for the next command
+  // float vmc_c = getValue(sdiResponse_c, '+', 1).toFloat()/10000;
+  // Serial.print("Volumetric Water Content: ");
+  // Serial.println(vmc_c);
+  // if(vmc_c>0.70 || vmc_c<-0.50){
+  //   sensors[3].activateAlarm+=1;
+  //   myBool = false;
+  // }
+  // if(vmc_c>0.70){
+  //   String message = "Teros C water content is too high at " + String(vmc_c) + ". Teros C might be in a puddle.";
+  //   LogError(message);
+  // }
+  // else if(vmc_c<-0.5){
+  //   String message = "Teros C water content is too low at " + String(vmc_c) + ". Check sensor.";
+  //   LogError(message);
+  // }
 
-  float tmp_c = getValue(sdiResponse_c, '+', 2).toFloat();
-  Serial.print("Soil Temperature: ");
-  Serial.println(tmp_c);
-  if(tmp_c>50 || tmp_c<-40){
-    sensors[2].activateAlarm+=1;
-    myBool = false;
-    String message = "Teros C temperature is at " + String(tmp_c) + " c, which is out of range. Check the sensor.";
-    LogError(message);
-  }
-  float eC_c = getValue(sdiResponse_c, '+', 3).toFloat();
-  Serial.print("Electrical Conductivity: ");
-  Serial.println(eC_c);
-  if(eC_c < 0 || eC_c > 20){
-    sensors[2].activateAlarm+=1;
-    myBool = false;
-    String message = "Electrical conductivity for Teros C is outside of range at " + String(eC_c) + ". Check sensor.";
-    LogError(message);
-  }
+  // float tmp_c = getValue(sdiResponse_c, '+', 2).toFloat();
+  // Serial.print("Soil Temperature: ");
+  // Serial.println(tmp_c);
+  // if(tmp_c>50 || tmp_c<-40){
+  //   sensors[2].activateAlarm+=1;
+  //   myBool = false;
+  //   String message = "Teros C temperature is at " + String(tmp_c) + " c, which is out of range. Check the sensor.";
+  //   LogError(message);
+  // }
+  // float eC_c = getValue(sdiResponse_c, '+', 3).toFloat();
+  // Serial.print("Electrical Conductivity: ");
+  // Serial.println(eC_c);
+  // if(eC_c < 0 || eC_c > 20){
+  //   sensors[2].activateAlarm+=1;
+  //   myBool = false;
+  //   String message = "Electrical conductivity for Teros C is outside of range at " + String(eC_c) + ". Check sensor.";
+  //   LogError(message);
+  // }
 
-  Serial.println("Soil Moisture 3 is " + sdiResponse_c);
-  data.soil_moisture_teros3 = sdiResponse_c;
+  // Serial.println("Soil Moisture 3 is " + sdiResponse_c);
+  // data.soil_moisture_teros3 = sdiResponse_c;
   return myBool;
 
 }
@@ -900,7 +931,7 @@ String createDataJSON(const SensorData& data) {
   json += "  \"soil\": {\n";
   json += "    \"teros_percent{a+vmc+tmp+ec}\": " + data.soil_moisture_teros + ",\n";
   json += "    \"teros2_percent{a+vmc+tmp+ec}\": " + data.soil_moisture_teros2 + ",\n";
-  json += "    \"teros3_percent{a+vmc+tmp+ec}\": " + data.soil_moisture_teros3 + ",\n";
+  // json += "    \"teros3_percent{a+vmc+tmp+ec}\": " + data.soil_moisture_teros3 + ",\n";
   json += "  },\n";
   json += "  \"system\": {\n";
   json += "    \"battery_v\": " + String(data.battery_voltage, 2) + ",\n";
@@ -942,6 +973,7 @@ sensors[8].type = PYRANOMETER_DOWN;
   Wire.begin();
 
   sd_ok = SD.begin(12);
+  Serial.println("Sd okay " + String(sd_ok));
   
 
   sw.begin(0x6B);
@@ -967,15 +999,29 @@ sensors[8].type = PYRANOMETER_DOWN;
       Serial.println(now.timestamp());
     }
   }
-
-  // Initialize ADS1115
-  if (!ads.begin()) {
-    Serial.println("ERROR: ADS1115 not found!");
+  if (!ads.begin(0x48)){
+    Serial.println("ERROR: ADS1115 onboard chip not found!");
     apogeeFlag = 1;
   } else {
-    Serial.println("ADS1115 initialized successfully");
+    Serial.println("ADS1115 onboard chip initialized successfully");
+    ads1.setGain(GAIN_ONE);
+  }
+  // Initialize ADS1115
+  if (!ads1.begin(0x4A)) {
+    Serial.println("ERROR: ADS1115 board 1 not found!");
+    apogeeFlag = 1;
+  } else {
+    Serial.println("ADS1115 Board 1 initialized successfully");
+    ads1.setGain(GAIN_ONE);
   }
   
+  if (!ads2.begin(0x49)) {
+    Serial.println("ERROR: ADS1115 board 2 not found!");
+    apogeeFlag = 1;
+  } else {
+    Serial.println("ADS1115 Board 2 initialized successfully");
+    ads1.setGain(GAIN_SIXTEEN);
+  }
   // Initialize temperature sensor
   tempSensor.begin();
   Serial.println("Temperature sensor initialized");
@@ -994,7 +1040,7 @@ sensors[8].type = PYRANOMETER_DOWN;
   Serial.println(F("✓ Switched power enabled"));
   Serial.println(F("  Check: 'Switched Power Out' LED should be ON now!\n"));
 
-
+/*
   //set up modem pins
   Serial.println(F("Configuring modem pins..."));
   pinMode(modemVccPin, OUTPUT);
@@ -1113,6 +1159,7 @@ sensors[8].type = PYRANOMETER_DOWN;
   }
   modem.sendAT("+CSMP=31,167,0,0"); 
   modem.waitResponse();
+  */
 }
 
 void sendAlarm(){
